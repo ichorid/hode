@@ -44,7 +44,8 @@ struct KeyMapping {
 
 struct System_SDL2 : System {
 	enum {
-		kJoystickCommitValue = 3200,
+		kStickEnterThreshold = 16000,  /* ~49% of 32767, set direction */
+		kStickExitThreshold = 8000,   /* ~24%, clear direction (hysteresis) */
 		kKeyMappingsSize = 20,
 		kAudioHz = 22050
 	};
@@ -66,6 +67,16 @@ struct System_SDL2 : System {
 	uint8_t _gammaLut[256];
 	SDL_GameController *_controller;
 	SDL_Joystick *_joystick;
+
+	/* State-based directional input (left stick + dpad + joystick) */
+	int16_t _leftStickX, _leftStickY;
+	uint8_t _controllerDpadMask;
+	int16_t _joystickAxis0, _joystickAxis1;
+	uint8_t _joystickHatMask;
+	bool _leftStickLeft, _leftStickRight, _leftStickUp, _leftStickDown;
+	bool _joystickLeft, _joystickRight, _joystickUp, _joystickDown;
+
+	void updatePadDirectionMask();
 
 	System_SDL2();
 	virtual ~System_SDL2() {}
@@ -121,7 +132,11 @@ bool System_hasCommandLine() {
 System_SDL2::System_SDL2() :
 	_offscreenLut(0),
 	_window(0), _renderer(0), _texture(0), _backgroundTexture(0), _fmt(0), _widescreenTexture(0),
-	_controller(0), _joystick(0) {
+	_controller(0), _joystick(0),
+	_leftStickX(0), _leftStickY(0), _controllerDpadMask(0),
+	_joystickAxis0(0), _joystickAxis1(0), _joystickHatMask(0),
+	_leftStickLeft(false), _leftStickRight(false), _leftStickUp(false), _leftStickDown(false),
+	_joystickLeft(false), _joystickRight(false), _joystickUp(false), _joystickDown(false) {
 	for (int i = 0; i < 256; ++i) {
 		_gammaLut[i] = i;
 	}
@@ -501,6 +516,9 @@ void System_SDL2::processEvents() {
 				_joystick = SDL_JoystickOpen(ev.jdevice.which);
 				if (_joystick) {
 					fprintf(stdout, "Using joystick '%s'\n", SDL_JoystickName(_joystick));
+					_joystickAxis0 = _joystickAxis1 = 0;
+					_joystickHatMask = 0;
+					_joystickLeft = _joystickRight = _joystickUp = _joystickDown = false;
 				}
 			}
 			break;
@@ -509,43 +527,30 @@ void System_SDL2::processEvents() {
 				fprintf(stdout, "Removed joystick '%s'\n", SDL_JoystickName(_joystick));
 				SDL_JoystickClose(_joystick);
 				_joystick = 0;
+				_joystickAxis0 = _joystickAxis1 = 0;
+				_joystickHatMask = 0;
+				_joystickLeft = _joystickRight = _joystickUp = _joystickDown = false;
 			}
 			break;
 		case SDL_JOYHATMOTION:
 			if (_joystick) {
-				pad.mask &= ~(SYS_INP_UP | SYS_INP_DOWN | SYS_INP_LEFT | SYS_INP_RIGHT);
-				if (ev.jhat.value & SDL_HAT_UP) {
-					pad.mask |= SYS_INP_UP;
-				}
-				if (ev.jhat.value & SDL_HAT_DOWN) {
-					pad.mask |= SYS_INP_DOWN;
-				}
-				if (ev.jhat.value & SDL_HAT_LEFT) {
-					pad.mask |= SYS_INP_LEFT;
-				}
-				if (ev.jhat.value & SDL_HAT_RIGHT) {
-					pad.mask |= SYS_INP_RIGHT;
-				}
+				_joystickHatMask = 0;
+				if (ev.jhat.value & SDL_HAT_UP)    _joystickHatMask |= SYS_INP_UP;
+				if (ev.jhat.value & SDL_HAT_DOWN)  _joystickHatMask |= SYS_INP_DOWN;
+				if (ev.jhat.value & SDL_HAT_LEFT)  _joystickHatMask |= SYS_INP_LEFT;
+				if (ev.jhat.value & SDL_HAT_RIGHT) _joystickHatMask |= SYS_INP_RIGHT;
 			}
 			break;
 		case SDL_JOYAXISMOTION:
 			if (_joystick) {
 				switch (ev.jaxis.axis) {
 				case 0:
-					pad.mask &= ~(SYS_INP_RIGHT | SYS_INP_LEFT);
-					if (ev.jaxis.value > kJoystickCommitValue) {
-						pad.mask |= SYS_INP_RIGHT;
-					} else if (ev.jaxis.value < -kJoystickCommitValue) {
-						pad.mask |= SYS_INP_LEFT;
-					}
+					_joystickAxis0 = ev.jaxis.value;
 					break;
 				case 1:
-					pad.mask &= ~(SYS_INP_UP | SYS_INP_DOWN);
-					if (ev.jaxis.value > kJoystickCommitValue) {
-						pad.mask |= SYS_INP_DOWN;
-					} else if (ev.jaxis.value < -kJoystickCommitValue) {
-						pad.mask |= SYS_INP_UP;
-					}
+					_joystickAxis1 = ev.jaxis.value;
+					break;
+				default:
 					break;
 				}
 			}
@@ -591,6 +596,9 @@ void System_SDL2::processEvents() {
 				_controller = SDL_GameControllerOpen(ev.cdevice.which);
 				if (_controller) {
 					fprintf(stdout, "Using controller '%s'\n", SDL_GameControllerName(_controller));
+					_leftStickX = _leftStickY = 0;
+					_controllerDpadMask = 0;
+					_leftStickLeft = _leftStickRight = _leftStickUp = _leftStickDown = false;
 				}
 			}
 			break;
@@ -599,36 +607,22 @@ void System_SDL2::processEvents() {
 				fprintf(stdout, "Removed controller '%s'\n", SDL_GameControllerName(_controller));
 				SDL_GameControllerClose(_controller);
 				_controller = 0;
+				_leftStickX = _leftStickY = 0;
+				_controllerDpadMask = 0;
+				_leftStickLeft = _leftStickRight = _leftStickUp = _leftStickDown = false;
 			}
 			break;
 		case SDL_CONTROLLERAXISMOTION:
 			if (_controller) {
+				/* Left stick only; right stick is ignored for movement */
 				switch (ev.caxis.axis) {
 				case SDL_CONTROLLER_AXIS_LEFTX:
-				case SDL_CONTROLLER_AXIS_RIGHTX:
-					if (ev.caxis.value < -kJoystickCommitValue) {
-						pad.mask |= SYS_INP_LEFT;
-					} else {
-						pad.mask &= ~SYS_INP_LEFT;
-					}
-					if (ev.caxis.value > kJoystickCommitValue) {
-						pad.mask |= SYS_INP_RIGHT;
-					} else {
-						pad.mask &= ~SYS_INP_RIGHT;
-					}
+					_leftStickX = ev.caxis.value;
 					break;
 				case SDL_CONTROLLER_AXIS_LEFTY:
-				case SDL_CONTROLLER_AXIS_RIGHTY:
-					if (ev.caxis.value < -kJoystickCommitValue) {
-						pad.mask |= SYS_INP_UP;
-					} else {
-						pad.mask &= ~SYS_INP_UP;
-					}
-					if (ev.caxis.value > kJoystickCommitValue) {
-						pad.mask |= SYS_INP_DOWN;
-					} else {
-						pad.mask &= ~SYS_INP_DOWN;
-					}
+					_leftStickY = ev.caxis.value;
+					break;
+				default:
 					break;
 				}
 			}
@@ -672,30 +666,30 @@ void System_SDL2::processEvents() {
 					break;
 				case SDL_CONTROLLER_BUTTON_DPAD_UP:
 					if (pressed) {
-						pad.mask |= SYS_INP_UP;
+						_controllerDpadMask |= SYS_INP_UP;
 					} else {
-						pad.mask &= ~SYS_INP_UP;
+						_controllerDpadMask &= ~SYS_INP_UP;
 					}
 					break;
 				case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
 					if (pressed) {
-						pad.mask |= SYS_INP_DOWN;
+						_controllerDpadMask |= SYS_INP_DOWN;
 					} else {
-						pad.mask &= ~SYS_INP_DOWN;
+						_controllerDpadMask &= ~SYS_INP_DOWN;
 					}
 					break;
 				case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
 					if (pressed) {
-						pad.mask |= SYS_INP_LEFT;
+						_controllerDpadMask |= SYS_INP_LEFT;
 					} else {
-						pad.mask &= ~SYS_INP_LEFT;
+						_controllerDpadMask &= ~SYS_INP_LEFT;
 					}
 					break;
 				case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
 					if (pressed) {
-						pad.mask |= SYS_INP_RIGHT;
+						_controllerDpadMask |= SYS_INP_RIGHT;
 					} else {
-						pad.mask &= ~SYS_INP_RIGHT;
+						_controllerDpadMask &= ~SYS_INP_RIGHT;
 					}
 					break;
 				}
@@ -706,6 +700,7 @@ void System_SDL2::processEvents() {
 			break;
 		}
 	}
+	updatePadDirectionMask();
 	updateKeys(&inp);
 }
 
@@ -800,6 +795,68 @@ void System_SDL2::setupDefaultKeyMappings() {
 	addKeyMapping(SDL_SCANCODE_D,        SYS_INP_SHOOT | SYS_INP_RUN);
 	addKeyMapping(SDL_SCANCODE_SPACE,    SYS_INP_SHOOT | SYS_INP_RUN);
 	addKeyMapping(SDL_SCANCODE_ESCAPE,   SYS_INP_ESC);
+}
+
+void System_SDL2::updatePadDirectionMask() {
+	const uint8_t dirMask = SYS_INP_UP | SYS_INP_DOWN | SYS_INP_LEFT | SYS_INP_RIGHT;
+	uint8_t directionBits = 0;
+
+	if (_controller) {
+		/* Hysteresis: enter at EnterThreshold, exit at ExitThreshold */
+		if (_leftStickX < -kStickEnterThreshold) {
+			_leftStickLeft = true;
+		} else if (_leftStickX > -kStickExitThreshold) {
+			_leftStickLeft = false;
+		}
+		if (_leftStickX > kStickEnterThreshold) {
+			_leftStickRight = true;
+		} else if (_leftStickX < kStickExitThreshold) {
+			_leftStickRight = false;
+		}
+		if (_leftStickY < -kStickEnterThreshold) {
+			_leftStickUp = true;
+		} else if (_leftStickY > -kStickExitThreshold) {
+			_leftStickUp = false;
+		}
+		if (_leftStickY > kStickEnterThreshold) {
+			_leftStickDown = true;
+		} else if (_leftStickY < kStickExitThreshold) {
+			_leftStickDown = false;
+		}
+		if (_leftStickLeft)  directionBits |= SYS_INP_LEFT;
+		if (_leftStickRight) directionBits |= SYS_INP_RIGHT;
+		if (_leftStickUp)    directionBits |= SYS_INP_UP;
+		if (_leftStickDown)  directionBits |= SYS_INP_DOWN;
+		directionBits |= _controllerDpadMask & dirMask;
+	} else if (_joystick) {
+		if (_joystickAxis0 < -kStickEnterThreshold) {
+			_joystickLeft = true;
+		} else if (_joystickAxis0 > -kStickExitThreshold) {
+			_joystickLeft = false;
+		}
+		if (_joystickAxis0 > kStickEnterThreshold) {
+			_joystickRight = true;
+		} else if (_joystickAxis0 < kStickExitThreshold) {
+			_joystickRight = false;
+		}
+		if (_joystickAxis1 < -kStickEnterThreshold) {
+			_joystickUp = true;
+		} else if (_joystickAxis1 > -kStickExitThreshold) {
+			_joystickUp = false;
+		}
+		if (_joystickAxis1 > kStickEnterThreshold) {
+			_joystickDown = true;
+		} else if (_joystickAxis1 < kStickExitThreshold) {
+			_joystickDown = false;
+		}
+		if (_joystickLeft)  directionBits |= SYS_INP_LEFT;
+		if (_joystickRight) directionBits |= SYS_INP_RIGHT;
+		if (_joystickUp)    directionBits |= SYS_INP_UP;
+		if (_joystickDown)  directionBits |= SYS_INP_DOWN;
+		directionBits |= _joystickHatMask & dirMask;
+	}
+
+	pad.mask = (pad.mask & ~dirMask) | directionBits;
 }
 
 void System_SDL2::updateKeys(PlayerInput *inp) {
