@@ -1016,17 +1016,21 @@ int Game::getSoundObjectPanning(SssObject *so) const {
 		switch (obj->type) {
 		case 8:
 		case 2:
-		case 0:
-			if (obj->screenNum == _currentLeftScreen) {
+		case 0: {
+			const uint8_t viewScreen = _andyObject ? _andyObject->screenNum : _currentScreen;
+			const uint8_t leftScreen = _res->_screensGrid[viewScreen][kPosLeftScreen];
+			const uint8_t rightScreen = _res->_screensGrid[viewScreen][kPosRightScreen];
+			if (obj->screenNum == leftScreen) {
 				return -1;
 			}
-			if (obj->screenNum == _currentRightScreen) {
+			if (obj->screenNum == rightScreen) {
 				return 129;
 			}
-			if (obj->screenNum == _currentScreen || (_currentLevel == kLvl_lar2 && obj->spriteNum == 27) || (_currentLevel == kLvl_isld && obj->spriteNum == 26)) {
+			if (obj->screenNum == viewScreen || (_currentLevel == kLvl_lar2 && obj->spriteNum == 27) || (_currentLevel == kLvl_isld && obj->spriteNum == 26)) {
 				const int dist = (obj->xPos + obj->width / 2) / 2;
 				return CLIP(dist, 0, 128);
 			}
+		}
 			// fall-through
 		default:
 			return -2;
