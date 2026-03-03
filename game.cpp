@@ -2680,7 +2680,7 @@ void Game::displayLoadingScreen() {
 int Game::displayHintScreen(int num, int pause) {
 	static const int kQuitYes = 0;
 	static const int kQuitNo = 1;
-	int quit = kQuitYes;
+	int quit = kQuitNo;
 	bool confirmQuit = false;
 	uint8_t *quitBuffers[] = {
 		_video->_frontLayer,
@@ -2704,7 +2704,7 @@ int Game::displayHintScreen(int num, int pause) {
 			_video->updateYuvDisplay();
 		} else {
 			g_system->setPalette(_video->_palette, 256, 6);
-			g_system->copyRect(0, 0, Video::W, Video::H, _video->_frontLayer, 256);
+			g_system->copyRect(0, 0, Video::W, Video::H, confirmQuit ? quitBuffers[quit] : _video->_frontLayer, 256);
 		}
 		g_system->updateScreen(false);
 		do {
