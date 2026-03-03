@@ -46,6 +46,7 @@ struct System_SDL2 : System {
 	enum {
 		kStickEnterThreshold = 16000,  /* ~49% of 32767, set direction */
 		kStickExitThreshold = 8000,   /* ~24%, clear direction (hysteresis) */
+		kTriggerThreshold = 16000,    /* right trigger above this = run */
 		kKeyMappingsSize = 20,
 		kAudioHz = 22050
 	};
@@ -70,6 +71,7 @@ struct System_SDL2 : System {
 
 	/* State-based directional input (left stick + dpad + joystick) */
 	int16_t _leftStickX, _leftStickY;
+	int16_t _rightTrigger;
 	uint8_t _controllerDpadMask;
 	int16_t _joystickAxis0, _joystickAxis1;
 	uint8_t _joystickHatMask;
@@ -133,7 +135,7 @@ System_SDL2::System_SDL2() :
 	_offscreenLut(0),
 	_window(0), _renderer(0), _texture(0), _backgroundTexture(0), _fmt(0), _widescreenTexture(0),
 	_controller(0), _joystick(0),
-	_leftStickX(0), _leftStickY(0), _controllerDpadMask(0),
+	_leftStickX(0), _leftStickY(0), _rightTrigger(0), _controllerDpadMask(0),
 	_joystickAxis0(0), _joystickAxis1(0), _joystickHatMask(0),
 	_leftStickLeft(false), _leftStickRight(false), _leftStickUp(false), _leftStickDown(false),
 	_joystickLeft(false), _joystickRight(false), _joystickUp(false), _joystickDown(false) {
@@ -596,7 +598,7 @@ void System_SDL2::processEvents() {
 				_controller = SDL_GameControllerOpen(ev.cdevice.which);
 				if (_controller) {
 					fprintf(stdout, "Using controller '%s'\n", SDL_GameControllerName(_controller));
-					_leftStickX = _leftStickY = 0;
+					_leftStickX = _leftStickY = _rightTrigger = 0;
 					_controllerDpadMask = 0;
 					_leftStickLeft = _leftStickRight = _leftStickUp = _leftStickDown = false;
 				}
@@ -607,20 +609,23 @@ void System_SDL2::processEvents() {
 				fprintf(stdout, "Removed controller '%s'\n", SDL_GameControllerName(_controller));
 				SDL_GameControllerClose(_controller);
 				_controller = 0;
-				_leftStickX = _leftStickY = 0;
+				_leftStickX = _leftStickY = _rightTrigger = 0;
 				_controllerDpadMask = 0;
 				_leftStickLeft = _leftStickRight = _leftStickUp = _leftStickDown = false;
 			}
 			break;
 		case SDL_CONTROLLERAXISMOTION:
 			if (_controller) {
-				/* Left stick only; right stick is ignored for movement */
+				/* Left stick for movement; right trigger for run */
 				switch (ev.caxis.axis) {
 				case SDL_CONTROLLER_AXIS_LEFTX:
 					_leftStickX = ev.caxis.value;
 					break;
 				case SDL_CONTROLLER_AXIS_LEFTY:
 					_leftStickY = ev.caxis.value;
+					break;
+				case SDL_CONTROLLER_AXIS_TRIGGERRIGHT:
+					_rightTrigger = ev.caxis.value;
 					break;
 				default:
 					break;
@@ -634,16 +639,16 @@ void System_SDL2::processEvents() {
 				switch (ev.cbutton.button) {
 				case SDL_CONTROLLER_BUTTON_A:
 					if (pressed) {
-						pad.mask |= SYS_INP_RUN;
+						pad.mask |= SYS_INP_JUMP;
 					} else {
-						pad.mask &= ~SYS_INP_RUN;
+						pad.mask &= ~SYS_INP_JUMP;
 					}
 					break;
 				case SDL_CONTROLLER_BUTTON_B:
 					if (pressed) {
-						pad.mask |= SYS_INP_JUMP;
+						pad.mask |= SYS_INP_RUN;
 					} else {
-						pad.mask &= ~SYS_INP_JUMP;
+						pad.mask &= ~SYS_INP_RUN;
 					}
 					break;
 				case SDL_CONTROLLER_BUTTON_X:
@@ -861,6 +866,9 @@ void System_SDL2::updatePadDirectionMask() {
 	}
 
 	pad.mask = (pad.mask & ~dirMask) | directionBits;
+	if (_controller && _rightTrigger > kTriggerThreshold) {
+		pad.mask |= SYS_INP_RUN;
+	}
 }
 
 void System_SDL2::updateKeys(PlayerInput *inp) {
