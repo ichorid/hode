@@ -866,8 +866,13 @@ void System_SDL2::updatePadDirectionMask() {
 	}
 
 	pad.mask = (pad.mask & ~dirMask) | directionBits;
-	if (_controller && _rightTrigger > kTriggerThreshold) {
-		pad.mask |= SYS_INP_RUN;
+	if (_controller) {
+		pad.mask &= ~SYS_INP_RUN;
+		if (_rightTrigger > kTriggerThreshold ||
+		    SDL_GameControllerGetButton(_controller, SDL_CONTROLLER_BUTTON_B) ||
+		    SDL_GameControllerGetButton(_controller, SDL_CONTROLLER_BUTTON_Y)) {
+			pad.mask |= SYS_INP_RUN;
+		}
 	}
 }
 
