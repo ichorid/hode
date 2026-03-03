@@ -1027,8 +1027,8 @@ int Game::getSoundObjectPanning(SssObject *so) const {
 				return 129;
 			}
 			if (obj->screenNum == viewScreen || (_currentLevel == kLvl_lar2 && obj->spriteNum == 27) || (_currentLevel == kLvl_isld && obj->spriteNum == 26)) {
-				const int dist = (obj->xPos + obj->width / 2) / 2;
-				return CLIP(dist, 0, 128);
+				const int centerX = CLIP(obj->xPos + obj->width / 2, 0, 256);
+				return centerX / 2;
 			}
 		}
 			// fall-through
