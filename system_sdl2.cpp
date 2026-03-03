@@ -662,7 +662,11 @@ void System_SDL2::processEvents() {
 					break;
 				case SDL_CONTROLLER_BUTTON_BACK:
 				case SDL_CONTROLLER_BUTTON_START:
-					inp.quit = pressed;
+					if (pressed) {
+						pad.mask |= SYS_INP_ESC;
+					} else {
+						pad.mask &= ~SYS_INP_ESC;
+					}
 					break;
 				case SDL_CONTROLLER_BUTTON_DPAD_UP:
 					if (pressed) {
